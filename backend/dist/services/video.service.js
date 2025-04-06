@@ -7,12 +7,11 @@ exports.processVideoForHLS = void 0;
 const fs_1 = __importDefault(require("fs"));
 const fluent_ffmpeg_1 = __importDefault(require("fluent-ffmpeg"));
 const movie_repository_1 = require("../repositories/movie.repository");
-;
 const resolutions = [
-    { width: 1920, height: 1080, bitRate: 2000 }, // 1080p
-    { width: 1280, height: 720, bitRate: 1000 }, // 720p
-    { width: 854, height: 480, bitRate: 500 }, // 480p
-    { width: 640, height: 360, bitRate: 400 }, // 360p
+    { width: 1920, height: 1080, bitRate: 2000 },
+    { width: 1280, height: 720, bitRate: 1000 },
+    { width: 854, height: 480, bitRate: 500 },
+    { width: 640, height: 360, bitRate: 400 },
 ];
 /**
  * Processes a video file for HTTP Live Streaming (HLS).
@@ -25,15 +24,30 @@ const resolutions = [
  */
 const processVideoForHLS = (inputPath, outputPath, callback) => {
     (0, movie_repository_1.createMovie)(outputPath);
-    fs_1.default.mkdirSync(outputPath, { recursive: true }); // Create the output directory
-    const masterPlaylist = `${outputPath}/master.m3u8`; // Path to the master playlist file
+    fs_1.default.mkdirSync(outputPath, { recursive: true });
+    // Step 1: Generate thumbnail
+    const thumbnailPath = `${outputPath}/thumbnail.jpg`;
+    (0, fluent_ffmpeg_1.default)(inputPath)
+        .screenshots({
+        timestamps: ['00:00:02'],
+        filename: 'thumbnail.jpg',
+        folder: outputPath,
+        size: '640x360',
+    })
+        .on('end', () => {
+        console.log('Thumbnail generated at', thumbnailPath);
+    })
+        .on('error', (err) => {
+        console.error('Error generating thumbnail:', err);
+    });
+    // Step 2: Process HLS
+    const masterPlaylist = `${outputPath}/master.m3u8`;
     const masterContent = [];
     let countProcessing = 0;
     resolutions.forEach((resolution) => {
-        console.log(`Processing video for resolution: ${resolution.width}x${resolution.height}`);
         const variantOutput = `${outputPath}/${resolution.height}p`;
-        const variantPlaylist = `${variantOutput}/playlist.m3u8`; // Path to the variant playlist file
-        fs_1.default.mkdirSync(variantOutput, { recursive: true }); // Create the variant directory
+        const variantPlaylist = `${variantOutput}/playlist.m3u8`;
+        fs_1.default.mkdirSync(variantOutput, { recursive: true });
         (0, fluent_ffmpeg_1.default)(inputPath)
             .outputOptions([
             `-vf scale=w=${resolution.width}:h=${resolution.height}`,
@@ -42,26 +56,21 @@ const processVideoForHLS = (inputPath, outputPath, callback) => {
             '-codec:a aac',
             '-hls_time 10',
             '-hls_playlist_type vod',
-            `-hls_segment_filename ${variantOutput}/segment%03d.ts`
+            `-hls_segment_filename ${variantOutput}/segment%03d.ts`,
         ])
-            .output(variantPlaylist) // Output to the variant playlist file
+            .output(variantPlaylist)
             .on('end', () => {
-            // When the processing ends for a resolution, add the variant playlist to the master playlist
             masterContent.push(`#EXT-X-STREAM-INF:BANDWIDTH=${resolution.bitRate * 1000},RESOLUTION=${resolution.width}x${resolution.height}\n${resolution.height}p/playlist.m3u8`);
             countProcessing += 1;
             if (countProcessing === resolutions.length) {
-                console.log('Processing complete');
-                console.log(masterContent);
-                // When the processing ends for all resolutions, create the master playlist
                 fs_1.default.writeFileSync(masterPlaylist, `#EXTM3U\n${masterContent.join('\n')}`);
-                // place where video processing ends;
                 (0, movie_repository_1.updateMovieStatus)(outputPath, 'COMPLETED');
-                callback(null, masterPlaylist); // Call the callback with the master playlist path
+                callback(null, masterPlaylist);
             }
         })
             .on('error', (error) => {
             console.log('An error occurred:', error);
-            callback(error); // Call the callback with the error
+            callback(error);
         })
             .run();
     });

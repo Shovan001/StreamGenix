@@ -27,3 +27,14 @@ export const updateMovieStatus = async (movieId: string, status: string) => {
 
     return response;
 }
+
+export const getCompletedMovies = async () => {
+    return prisma.movie.findMany({
+        where: {
+            processingStatus: 'COMPLETED'
+        },
+        orderBy: {
+            createdAt: 'desc'
+        }
+    });
+};

@@ -12,37 +12,72 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.uploadVideoController = void 0;
+exports.uploadVideoController = exports.getAllCompletedVideos = void 0;
 const video_service_1 = require("../services/video.service");
 const fs_1 = __importDefault(require("fs"));
-const uploadVideoController = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    if (!req.file) {
-        res.status(400).json({
-            success: false,
-            message: 'No file uploaded'
-        });
-        return;
+const fluent_ffmpeg_1 = __importDefault(require("fluent-ffmpeg"));
+const path_1 = __importDefault(require("path"));
+const movie_repository_1 = require("../repositories/movie.repository");
+const getAllCompletedVideos = (_req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const videos = yield (0, movie_repository_1.getCompletedMovies)();
+        res.status(200).json({ success: true, videos });
     }
-    const videoPath = req.file.path;
+    catch (err) {
+        res.status(500).json({ success: false, message: "Could not fetch videos." });
+    }
+});
+exports.getAllCompletedVideos = getAllCompletedVideos;
+const uploadVideoController = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d;
+    const videoFile = (_b = (_a = req.files) === null || _a === void 0 ? void 0 : _a['video']) === null || _b === void 0 ? void 0 : _b[0];
+    const thumbnailFile = (_d = (_c = req.files) === null || _c === void 0 ? void 0 : _c['thumbnail']) === null || _d === void 0 ? void 0 : _d[0];
+    if (!videoFile) {
+        return res.status(400).json({ success: false, message: 'No video uploaded' });
+    }
+    const videoPath = videoFile.path;
     const outputPath = `output/${Date.now()}`;
-    (0, video_service_1.processVideoForHLS)(videoPath, outputPath, (err, _) => {
+    fs_1.default.mkdirSync(outputPath, { recursive: true });
+    (0, video_service_1.processVideoForHLS)(videoPath, outputPath, (err, masterPlaylist) => __awaiter(void 0, void 0, void 0, function* () {
         if (err) {
-            res.status(500).json({
-                success: false,
-                message: 'An error occurred while processing the video'
-            });
-            return;
+            return res.status(500).json({ success: false, message: 'Error processing video' });
         }
-        // Delete the video file after processing
-        fs_1.default.unlink(videoPath, (err) => {
-            if (err) {
-                console.log('An error occurred while deleting the video file:', err);
-            }
-        });
-    });
-    res.status(200).json({
-        success: true,
-        message: 'Video processed successfully',
-    });
+        const thumbnailPath = path_1.default.join(outputPath, 'thumbnail.jpg');
+        const saveResponse = () => {
+            // Delete temp uploaded files
+            fs_1.default.unlink(videoPath, () => { });
+            if (thumbnailFile)
+                fs_1.default.unlink(thumbnailFile.path, () => { });
+            return res.status(200).json({
+                success: true,
+                message: 'Video processed successfully',
+                videoId: outputPath.replace('output/', ''),
+                thumbnailUrl: `/output/${outputPath.replace('output/', '')}/thumbnail.jpg`,
+            });
+        };
+        if (thumbnailFile) {
+            fs_1.default.copyFile(thumbnailFile.path, thumbnailPath, (err) => {
+                if (err) {
+                    console.error("Error saving custom thumbnail:", err);
+                    return res.status(500).json({ success: false, message: "Error saving custom thumbnail" });
+                }
+                return saveResponse();
+            });
+        }
+        else {
+            (0, fluent_ffmpeg_1.default)(videoPath)
+                .screenshots({
+                timestamps: ['00:00:01'],
+                filename: 'thumbnail.jpg',
+                folder: outputPath,
+                size: '320x240',
+            })
+                .on('end', saveResponse)
+                .on('error', (error) => {
+                console.error('Thumbnail generation failed:', error);
+                res.status(500).json({ success: false, message: 'Thumbnail generation failed' });
+            });
+        }
+    }));
 });
 exports.uploadVideoController = uploadVideoController;

@@ -1,7 +1,12 @@
 import multer from 'multer';
 
 const upload = multer({
-    dest: 'uploads/',
+  dest: 'uploads/',
 });
 
-export default upload;
+export const multiUpload = upload.fields([
+  { name: 'video', maxCount: 1 },
+  { name: 'thumbnail', maxCount: 1 },
+]);
+
+export default multiUpload;
